@@ -1,9 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
+import { getSupabase } from './supabase.js';
 
 const KEY='treeo-storage-v1';
-const SUPABASE_URL='https://pzvayflxdicppwrcfnwy.supabase.co';
-const SUPABASE_KEY='sb_publishable_yF7Jp-goS1v7B4spb1XxPA_EYEjqAcu';
-const supabase=createClient(SUPABASE_URL,SUPABASE_KEY);
+const supabase=getSupabase();
 
 export function createStorage(){return {wood:0,stone:0,meat:0,ammo:0,bandage:0};}
 
