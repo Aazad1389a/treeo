@@ -6,21 +6,36 @@ export const remotePlayers={};
 let sceneRef=null,channel=null,db=null,currentId=null;
 const SUPABASE_URL='https://pzvayflxdicppwrcfnwy.supabase.co';
 const SUPABASE_KEY='sb_publishable_yF7Jp-goS1v7B4spb1XxPA_EYEjqAcu';
+let lastPersistAt=0;
+let persistInFlight=false;
+let pendingPlayer=null;
 
 function makeRemoteAvatar(){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.CapsuleGeometry(.35,1,4,8),new THREE.MeshStandardMaterial({color:0x3d8fd6}));body.position.y=1;const head=new THREE.Mesh(new THREE.SphereGeometry(.28,10,10),new THREE.MeshStandardMaterial({color:0xf0c9a0}));head.position.y=1.75;g.add(body,head);g.traverse(o=>o.castShadow=true);return{group:g,hit:body};}
 function upsertRemote(p){let rp=remotePlayers[p.id];if(!rp){const av=makeRemoteAvatar();av.hit.userData.playerId=p.id;av.group.userData.playerId=p.id;sceneRef.add(av.group);rp=remotePlayers[p.id]={group:av.group,hitMesh:av.hit,target:p};}rp.target={x:p.x,y:p.y,z:p.z,yaw:p.yaw};rp.lastSeen=performance.now();}
 
-async function persistPlayer(player){
+async function writePlayer(player){
   if(!db||!currentId||!player)return;
   const row={player_id:currentId,name:player.name||'Player',level:player.level||1,x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw||0,hp:player.hp,hunger:player.hunger,stamina:player.stamina,xp:player.xp||0,inventory:player.inventory||{},weapons:player.weapons||[],weapon_ammo:player.weaponAmmo||{},active_slot:player.activeSlot||0,updated_at:new Date().toISOString()};
-  const {error}=await db.from('player_states').upsert(row,{onConflict:'player_id'});if(error)console.warn('TREEO player sync:',error.message);
+  persistInFlight=true;
+  const {error}=await db.from('player_states').upsert(row,{onConflict:'player_id'});
+  persistInFlight=false;
+  if(error)console.warn('TREEO player sync:',error.message);
+  if(pendingPlayer){const next=pendingPlayer;pendingPlayer=null;writePlayer(next);}
+}
+function persistPlayer(player){
+  if(!db||!currentId||!player)return;
+  const now=performance.now();
+  if(now-lastPersistAt<1500){pendingPlayer=player;return;}
+  if(persistInFlight){pendingPlayer=player;return;}
+  lastPersistAt=now;
+  writePlayer(player);
 }
 
 async function loadStructures(){
   if(!db||!sceneRef)return;
   const {data,error}=await db.from('world_structures').select('*').order('created_at',{ascending:true});
   if(error){console.warn('TREEO structure load:',error.message);return;}
-  for(const row of data||[]){addStructure(sceneRef,{id:row.id,kind:row.type,x:row.x,y:row.y,z:row.z,ry:row.rotation||0},false);}
+  for(const row of data||[])addStructure(sceneRef,{id:row.id,kind:row.type,x:row.x,y:row.y,z:row.z,ry:row.rotation||0},false);
 }
 
 export function initMultiplayer(scene,url,key,name,myId,handlers){
