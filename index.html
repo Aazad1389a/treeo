@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>بازی بقا | Survival Online</title>
+<style>
+  :root{
+    --accent:#7fd858;
+    --accent2:#e8b24b;
+    --danger:#e05c4d;
+    --panel: rgba(10,18,14,0.82);
+    --line: rgba(255,255,255,0.12);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent; user-select:none;}
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:'Segoe UI', Tahoma, Arial, sans-serif;}
+  #c{position:fixed;inset:0;display:block;outline:none;}
+
+  #splash{
+    position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 50% 30%, #1c2b1e 0%, #0a120c 60%, #050805 100%);
+    color:#eafbe6; text-align:center; gap:18px; padding:20px;
+  }
+  #logo-svg{width:min(560px,86vw); filter:drop-shadow(0 8px 30px rgba(0,0,0,.6));}
+  #splash h1{margin:0;font-size:14px;letter-spacing:3px;color:#9fdc86;font-weight:600;}
+  #splash p{max-width:520px;color:#b7c9b4;font-size:14px;line-height:1.9;margin:0;}
+  .btn{
+    cursor:pointer; border:1px solid var(--line); background:linear-gradient(180deg,#233a26,#152018);
+    color:#eafbe6; padding:14px 34px; border-radius:10px; font-size:16px; font-weight:700; letter-spacing:1px;
+    box-shadow:0 6px 18px rgba(0,0,0,.4);
+  }
+  .btn:active{transform:scale(.96);}
+  .btn.primary{background:linear-gradient(180deg,var(--accent),#4f9c33); color:#0b1a0c; border-color:transparent;}
+  #srv-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px;}
+  #srv-row input{background:#0e1a11;border:1px solid var(--line);color:#dff0da;padding:10px 12px;border-radius:8px;font-size:13px;width:220px;}
+  #srv-note{font-size:11px;color:#7c8f78;max-width:480px;}
+
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:20;font-variant-numeric:tabular-nums;display:none;}
+  .bar-wrap{position:absolute;bottom:18px;left:18px;display:flex;flex-direction:column;gap:6px;width:230px;}
+  .bar{height:14px;border-radius:7px;background:rgba(0,0,0,.45);border:1px solid var(--line);overflow:hidden;position:relative;}
+  .bar>i{display:block;height:100%;border-radius:7px 0 0 7px;transition:width .25s;}
+  .bar span{position:absolute;inset:0;display:flex;align-items:center;padding-inline-start:8px;font-size:10px;color:#fff;text-shadow:0 1px 2px #000;}
+  #hp>i{background:linear-gradient(90deg,#e05c4d,#f08a7d);}
+  #hunger>i{background:linear-gradient(90deg,var(--accent2),#f5cf7f);}
+  #stam>i{background:linear-gradient(90deg,#5aa8e0,#8fd0f7);}
+
+  #crosshair{position:absolute;top:50%;left:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.6);}
+  #hotbar{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:6px;pointer-events:auto;}
+  .slot{width:52px;height:52px;background:rgba(0,0,0,.45);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;position:relative;font-size:22px;}
+  .slot.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(127,216,88,.35) inset;}
+  .slot .cnt{position:absolute;bottom:2px;right:5px;font-size:10px;color:#fff;background:rgba(0,0,0,.5);padding:0 4px;border-radius:5px;}
+
+  #topinfo{position:absolute;top:14px;left:14px;color:#dfe;font-size:12px;background:var(--panel);padding:8px 12px;border-radius:8px;border:1px solid var(--line);line-height:1.6;}
+  #promptText{position:absolute;bottom:100px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;background:rgba(0,0,0,.55);padding:6px 14px;border-radius:8px;display:none;}
+  #dmgFlash{position:fixed;inset:0;background:radial-gradient(circle, transparent 40%, rgba(224,92,77,.45) 100%);opacity:0;transition:opacity .25s;pointer-events:none;z-index:25;}
+  #deathScreen{position:fixed;inset:0;background:rgba(10,0,0,.75);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:40;color:#fff;gap:14px;}
+
+  #bpPanel{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(420px,90vw);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;pointer-events:auto;display:none;}
+  #bpPanel h3{margin:0 0 12px;color:#eafbe6;font-size:14px;letter-spacing:1px;}
+  #bpGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  #bpGrid .slot{width:100%;height:60px;}
+
+  #players{position:absolute;top:14px;right:14px;color:#dfe;font-size:11px;background:var(--panel);padding:8px 10px;border-radius:8px;border:1px solid var(--line);max-width:160px;pointer-events:none;}
+  #players .p{opacity:.85;}
+
+  #mobileUI{position:fixed;inset:0;z-index:15;display:none;pointer-events:none;}
+  #joyBase{position:absolute;bottom:34px;left:28px;width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);pointer-events:auto;}
+  #joyKnob{position:absolute;top:50%;left:50%;width:48px;height:48px;margin:-24px;border-radius:50%;background:rgba(255,255,255,.35);}
+  #lookPad{position:absolute;top:0;right:0;width:55%;height:70%;pointer-events:auto;}
+  .mbtn{position:absolute;pointer-events:auto;border-radius:50%;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:700;}
+  #btnShoot{width:76px;height:76px;bottom:100px;right:26px;}
+  #btnJump{width:56px;height:56px;bottom:34px;right:118px;}
+  #btnUse{width:56px;height:56px;bottom:34px;right:190px;}
+  #btnInv{width:44px;height:44px;top:14px;right:14px;font-size:16px;}
+  #tips{position:absolute;bottom:8px;right:12px;font-size:10px;color:#7c8f78;}
+  ::-webkit-scrollbar{display:none;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="splash">
+  <svg id="logo-svg" viewBox="0 0 600 220" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="skyg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#0a1b10"/><stop offset="1" stop-color="#12240f"/>
+      </linearGradient>
+      <linearGradient id="sunG" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffe8a3"/><stop offset="1" stop-color="#e8b24b"/>
+      </linearGradient>
+      <linearGradient id="txtG" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#c9f2a5"/><stop offset="1" stop-color="#7fd858"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="600" height="220" rx="18" fill="url(#skyg)"/>
+    <circle cx="470" cy="60" r="34" fill="url(#sunG)" opacity="0.9"/>
+    <polygon points="0,150 60,95 100,140 150,80 210,150" fill="#0d2a12"/>
+    <polygon points="150,160 230,90 300,150 380,100 470,160" fill="#123a18"/>
+    <polygon points="0,220 600,220 600,150 470,120 380,160 300,130 210,170 100,140 0,170" fill="#0f2e14"/>
+    <g transform="translate(300,60)">
+      <path d="M0 -18 L4 -4 L18 -4 L7 4 L11 18 L0 9 L-11 18 L-7 4 L-18 -4 L-4 -4 Z" fill="#eafbe6" opacity=".85"/>
+    </g>
+    <text x="300" y="118" text-anchor="middle" font-family="Segoe UI, Arial" font-weight="800" font-size="46" fill="url(#txtG)" letter-spacing="4">SURVIVE</text>
+    <text x="300" y="150" text-anchor="middle" font-family="Segoe UI, Arial" font-weight="600" font-size="16" fill="#cfe7c6" letter-spacing="8">O N L I N E</text>
+    <rect x="230" y="164" width="140" height="2" fill="#7fd858" opacity=".6"/>
+  </svg>
+  <h1>بازی بقا و ساخت‌وساز — چندنفره آنلاین</h1>
+  <p>وارد دنیایی باز شو، منابع جمع کن، سلاح بساز، از خودت دفاع کن و با بازیکن‌های دیگه به‌صورت زنده در یک نقشه باش.</p>
+  <div id="srv-row">
+    <input id="inName" placeholder="نام بازیکن" maxlength="14">
+    <input id="inUrl" placeholder="Supabase URL (اختیاری)">
+    <input id="inKey" placeholder="Supabase anon key (اختیاری)">
+  </div>
+  <div id="srv-note">اگر خالی بگذاری، بازی تک‌نفره اجرا می‌شه. برای چندنفره یک پروژه‌ی رایگان Supabase بساز.</div>
+  <button class="btn primary" id="btnPlay">ورود به بازی</button>
+</div>
+
+<div id="hud">
+  <div id="topinfo">⏱ <span id="clockTxt">--:--</span> &nbsp;|&nbsp; 👥 <span id="cntTxt">1</span> آنلاین</div>
+  <div id="players"></div>
+  <div class="bar-wrap">
+    <div class="bar" id="hp"><i style="width:100%"></i><span>سلامتی</span></div>
+    <div class="bar" id="hunger"><i style="width:100%"></i><span>گرسنگی</span></div>
+    <div class="bar" id="stam"><i style="width:100%"></i><span>استامینا</span></div>
+  </div>
+  <div id="crosshair"></div>
+  <div id="promptText"></div>
+  <div id="hotbar"></div>
+</div>
+
+<div id="dmgFlash"></div>
+<div id="deathScreen">
+  <div style="font-size:26px;font-weight:800;">مُردی 💀</div>
+  <div style="font-size:13px;color:#ddd;">توسط <span id="deathReason">گرسنگی</span></div>
+  <button class="btn primary" id="btnRespawn">دوباره وارد شو</button>
+</div>
+
+<div id="bpPanel">
+  <h3>🎒 کوله‌پشتی</h3>
+  <div id="bpGrid"></div>
+</div>
+
+<div id="mobileUI">
+  <div id="joyBase"><div id="joyKnob"></div></div>
+  <div id="lookPad"></div>
+  <div class="mbtn" id="btnShoot">شلیک</div>
+  <div class="mbtn" id="btnJump">پرش</div>
+  <div class="mbtn" id="btnUse">برداشت</div>
+  <div class="mbtn" id="btnInv">🎒</div>
+</div>
+<div id="tips">WASD حرکت | ماوس نگاه | کلیک شلیک | E برداشتن | 1/2/3 سلاح | Tab کوله | R شارژ</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
