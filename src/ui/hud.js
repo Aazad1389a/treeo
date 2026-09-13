@@ -1,25 +1,13 @@
-export function updateBars(hp, hunger, stam) {
-  const hpEl = document.querySelector('.hp>i'), hungerEl = document.querySelector('.hungry>i'), stamEl = document.querySelector('.stam>i');
-  if (hpEl) hpEl.style.width = Math.max(0, Math.min(100, hp)) + '%';
-  if (hungerEl) hungerEl.style.width = Math.max(0, Math.min(100, hunger)) + '%';
-  if (stamEl) stamEl.style.width = Math.max(0, Math.min(100, stam)) + '%';
-}
-export function updateClockCount(count) { const el = document.getElementById('cntTxt'); if (el) el.textContent = count; }
-export function refreshHotbar(player, weaponAmmo, ITEM_DEFS) {
-  const hb = document.getElementById('hotbar'); if (!hb) return; hb.innerHTML = '';
-  for (let i = 0; i < 3; i++) { const kind = player.weapons[i], div = document.createElement('div'); div.className = 'slot' + (i === player.activeSlot ? ' active' : '');
-    if (kind && ITEM_DEFS[kind]) { div.innerHTML = ITEM_DEFS[kind].icon; if (kind !== 'axe') { const c = document.createElement('div'); c.className = 'cnt'; c.textContent = weaponAmmo[kind] ?? ''; div.appendChild(c); } }
-    div.addEventListener('click', () => { player.activeSlot = i; }); hb.appendChild(div);
-  }
-}
-export function refreshBackpack(player, ITEM_DEFS, onUse) {
-  const grid = document.getElementById('bpGrid'); if (!grid) return; grid.innerHTML = '';
-  Object.keys(player.inventory).forEach(kind => { if ((player.inventory[kind] || 0) <= 0 || !ITEM_DEFS[kind]) return; const div = document.createElement('div'); div.className = 'slot'; div.innerHTML = ITEM_DEFS[kind].icon; const c = document.createElement('div'); c.className = 'cnt'; c.textContent = player.inventory[kind]; div.appendChild(c); div.addEventListener('click', () => onUse(kind)); grid.appendChild(div); });
-}
-export function toggleBackpack(refreshFn) { const p = document.getElementById('bpPanel'); if (!p) return; p.style.display = p.style.display === 'block' ? 'none' : 'block'; if (p.style.display === 'block') refreshFn(); }
-export function setPrompt(text) { const el = document.getElementById('promptText'); if (!el) return; el.style.display = text ? 'block' : 'none'; if (text) el.textContent = text; }
-export function flashDamage() {}
-export function showDeath(reason) { const r = document.getElementById('deathReason'), s = document.getElementById('deathScreen'); if (r) r.textContent = reason; if (s) s.style.display = 'flex'; if (document.pointerLockElement) document.exitPointerLock(); }
-export function hideDeath() { const s = document.getElementById('deathScreen'); if (s) s.style.display = 'none'; }
-export function updatePlayersList(state, myId, myName) { const el = document.getElementById('players'); if (!el) return; el.innerHTML = '<div style="opacity:.6;margin-bottom:4px;">آنلاین</div>'; Object.entries(state).forEach(([id, arr]) => { const nm = arr[0]?.name || id.slice(0, 6); const div = document.createElement('div'); div.className = 'p'; div.textContent = id === myId ? '⭐ ' + myName + ' (شما)' : nm; el.appendChild(div); }); }
-export function enterGameUI() { const splash = document.getElementById('splash'), hud = document.getElementById('hud'); if (splash) splash.style.display = 'none'; if (hud) hud.style.display = 'block'; }
+export function updateBars(hp,hunger,stam){const a=document.querySelector('.hp>i'),b=document.querySelector('.hungry>i'),c=document.querySelector('.stam>i');if(a)a.style.width=Math.max(0,Math.min(100,hp))+'%';if(b)b.style.width=Math.max(0,Math.min(100,hunger))+'%';if(c)c.style.width=Math.max(0,Math.min(100,stam))+'%';}
+export function updateProgress(player,p){const l=document.getElementById('levelTxt'),x=document.getElementById('xpTxt'),bar=document.getElementById('xpBar');if(l)l.textContent=p.level;if(x)x.textContent=`${p.xp}/${p.need}`;if(bar)bar.style.width=p.percent+'%';}
+export function updateClockCount(count){const e=document.getElementById('cntTxt');if(e)e.textContent=count;}
+export function refreshHotbar(player,weaponAmmo,ITEM_DEFS,onSlot){const hb=document.getElementById('hotbar');if(!hb)return;hb.innerHTML='';for(let i=0;i<3;i++){const kind=player.weapons[i],d=document.createElement('div');d.className='slot'+(i===player.activeSlot?' active':'');if(kind&&ITEM_DEFS[kind]){d.innerHTML=ITEM_DEFS[kind].icon;if(kind!=='axe'){const c=document.createElement('div');c.className='cnt';c.textContent=weaponAmmo[kind]??'';d.appendChild(c);}}d.addEventListener('click',()=>onSlot?.(i));hb.appendChild(d);}}
+export function refreshBackpack(player,ITEM_DEFS,onUse){const grid=document.getElementById('bpGrid');if(!grid)return;grid.innerHTML='';Object.keys(player.inventory).forEach(k=>{if((player.inventory[k]||0)<=0||!ITEM_DEFS[k])return;const d=document.createElement('div');d.className='slot';d.innerHTML=ITEM_DEFS[k].icon;const c=document.createElement('div');c.className='cnt';c.textContent=player.inventory[k];d.appendChild(c);d.addEventListener('click',()=>onUse(k));grid.appendChild(d);});}
+export function toggleBackpack(fn){const p=document.getElementById('bpPanel');if(!p)return;p.style.display=p.style.display==='block'?'none':'block';if(p.style.display==='block')fn();}
+export function setPrompt(t){const e=document.getElementById('promptText');if(!e)return;e.style.display=t?'block':'none';if(t)e.textContent=t;}
+export function setBuildMode(active,kind,def){const e=document.getElementById('buildTxt');if(e)e.textContent=active?`ساخت: ${def?.name||kind} (${Object.entries(def?.cost||{}).map(([k,v])=>`${k}:${v}`).join(' ')})`:'حالت عادی';}
+export function flashDamage(){const e=document.getElementById('hud');if(!e)return;e.animate([{opacity:1},{opacity:.5},{opacity:1}],{duration:160});}
+export function showDeath(r){const x=document.getElementById('deathReason'),s=document.getElementById('deathScreen');if(x)x.textContent=r;if(s)s.style.display='flex';if(document.pointerLockElement)document.exitPointerLock();}
+export function hideDeath(){const s=document.getElementById('deathScreen');if(s)s.style.display='none';}
+export function updatePlayersList(state,myId,myName){const e=document.getElementById('players');if(!e)return;e.innerHTML='<div style="opacity:.6;margin-bottom:4px;">آنلاین</div>';Object.entries(state).forEach(([id,a])=>{const d=document.createElement('div');d.className='p';d.textContent=id===myId?'⭐ '+myName+' (شما)':(a[0]?.name||id.slice(0,6));e.appendChild(d);});}
+export function enterGameUI(){const s=document.getElementById('splash'),h=document.getElementById('hud');if(s)s.style.display='none';if(h)h.style.display='block';}
