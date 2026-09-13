@@ -31,6 +31,13 @@ function persistPlayer(player){
   writePlayer(player);
 }
 
+export async function loadPlayerState(playerId=currentId){
+  if(!db||!playerId)return null;
+  const {data,error}=await db.from('player_states').select('*').eq('player_id',playerId).maybeSingle();
+  if(error){console.warn('TREEO player load:',error.message);return null;}
+  return data||null;
+}
+
 async function loadStructures(){
   if(!db||!sceneRef)return;
   const {data,error}=await db.from('world_structures').select('*').order('created_at',{ascending:true});
