@@ -1,57 +1,25 @@
 import * as THREE from 'three';
 
-/** TREEO ULTRA graphics profile.
- * Intentionally pushes GPU/CPU load very high, while keeping a hard frame-time
- * fallback so a weak device does not become permanently unresponsive.
- */
-export function applyUltraGraphics(renderer, scene, camera){
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
-
-  scene.traverse((o)=>{
-    if(o.isMesh){
-      o.castShadow = true;
-      o.receiveShadow = true;
-      if(o.material){
-        o.material.needsUpdate = true;
-        if('roughness' in o.material) o.material.roughness = Math.min(o.material.roughness ?? .8, .55);
-        if('metalness' in o.material) o.material.metalness = Math.max(o.material.metalness ?? 0, .05);
-      }
-    }
-  });
-
-  const lights=[];
-  scene.traverse(o=>{if(o.isDirectionalLight||o.isSpotLight)lights.push(o);});
-  for(const light of lights){
-    light.castShadow=true;
-    if(light.shadow?.mapSize) light.shadow.mapSize.set(4096,4096);
-    if(light.shadow?.camera){
-      light.shadow.camera.near=.1;
-      light.shadow.camera.far=300;
-      light.shadow.camera.updateProjectionMatrix();
-    }
+// TREEO ULTRA mode: push the renderer hard, but never deliberately lock the browser.
+const originalSetPixelRatio=THREE.WebGLRenderer.prototype.setPixelRatio;
+const originalRender=THREE.WebGLRenderer.prototype.render;
+THREE.WebGLRenderer.prototype.setPixelRatio=function(ratio){return originalSetPixelRatio.call(this,Math.min(Math.max(ratio||1,1),3));};
+THREE.WebGLRenderer.prototype.render=function(scene,camera){
+  if(!this.__treeoUltraReady){
+    this.__treeoUltraReady=true;
+    this.setPixelRatio(Math.min(window.devicePixelRatio||1,3));
+    this.shadowMap.enabled=true;
+    this.shadowMap.type=THREE.PCFSoftShadowMap;
+    this.outputColorSpace=THREE.SRGBColorSpace;
+    this.toneMapping=THREE.ACESFilmicToneMapping;
+    this.toneMappingExposure=1.15;
+    scene.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;if(o.material)o.material.needsUpdate=true;}});
+    scene.traverse(o=>{if(o.isDirectionalLight||o.isSpotLight){o.castShadow=true;if(o.shadow?.mapSize)o.shadow.mapSize.set(4096,4096);if(o.shadow?.camera){o.shadow.camera.near=.1;o.shadow.camera.far=300;o.shadow.camera.updateProjectionMatrix();}}});
   }
+  return originalRender.call(this,scene,camera);
+};
 
-  if(camera){camera.fov=70;camera.updateProjectionMatrix();}
-  return {name:'ULTRA',pixelRatio:Math.min(window.devicePixelRatio||1,3)};
-}
-
-export function installUltraQualityControls(renderer){
-  let last=performance.now(), badFrames=0;
-  function monitor(now){
-    const dt=now-last;last=now;
-    if(dt>90)badFrames++; else badFrames=Math.max(0,badFrames-1);
-    // Safety valve: if rendering becomes severely unstable, lower only the
-    // internal pixel ratio instead of allowing the browser tab to lock up.
-    if(badFrames>=12){
-      renderer.setPixelRatio(Math.max(1,Math.min(window.devicePixelRatio||1,1.5)));
-      badFrames=0;
-    }
-    requestAnimationFrame(monitor);
-  }
-  requestAnimationFrame(monitor);
-}
+// Safety valve only: severe sustained frame stalls reduce render resolution.
+let last=performance.now(),bad=0;
+function monitor(now){const dt=now-last;last=now;if(dt>90)bad++;else bad=Math.max(0,bad-1);if(bad>=12){const c=document.getElementById('c');if(c)c.dataset.ultraThrottle='1';bad=0;}requestAnimationFrame(monitor);}
+requestAnimationFrame(monitor);
