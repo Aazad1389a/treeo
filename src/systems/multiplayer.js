@@ -1,11 +1,9 @@
 import * as THREE from 'three';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabase } from '../core/supabase.js';
 import { addStructure } from '../world/buildings.js';
 
 export const remotePlayers={};
 let sceneRef=null,channel=null,db=null,currentId=null;
-const SUPABASE_URL='https://pzvayflxdicppwrcfnwy.supabase.co';
-const SUPABASE_KEY='sb_publishable_yF7Jp-goS1v7B4spb1XxPA_EYEjqAcu';
 let lastPersistAt=0;
 let persistInFlight=false;
 let pendingPlayer=null;
@@ -47,8 +45,7 @@ async function loadStructures(){
 
 export function initMultiplayer(scene,url,key,name,myId,handlers){
   sceneRef=scene;currentId=myId;
-  const supabaseUrl=url||SUPABASE_URL,supabaseKey=key||SUPABASE_KEY;
-  try{db=createClient(supabaseUrl,supabaseKey);}catch(err){console.warn('Supabase client failed.',err);handlers.onReady();return;}
+  try{db=getSupabase();}catch(err){console.warn('Supabase client failed.',err);handlers.onReady();return;}
   loadStructures();
   channel=db.channel('survival-world',{config:{presence:{key:myId},broadcast:{self:false}}});
   channel.on('broadcast',{event:'move'},({payload})=>{if(payload.id!==myId)upsertRemote(payload);});
