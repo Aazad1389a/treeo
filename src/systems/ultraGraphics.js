@@ -1,6 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three-real';
 
-// TREEO ULTRA mode: push the renderer hard, but never deliberately lock the browser.
 const originalSetPixelRatio=THREE.WebGLRenderer.prototype.setPixelRatio;
 const originalRender=THREE.WebGLRenderer.prototype.render;
 THREE.WebGLRenderer.prototype.setPixelRatio=function(ratio){return originalSetPixelRatio.call(this,Math.min(Math.max(ratio||1,1),3));};
@@ -19,7 +18,5 @@ THREE.WebGLRenderer.prototype.render=function(scene,camera){
   return originalRender.call(this,scene,camera);
 };
 
-// Safety valve only: severe sustained frame stalls reduce render resolution.
-let last=performance.now(),bad=0;
-function monitor(now){const dt=now-last;last=now;if(dt>90)bad++;else bad=Math.max(0,bad-1);if(bad>=12){const c=document.getElementById('c');if(c)c.dataset.ultraThrottle='1';bad=0;}requestAnimationFrame(monitor);}
-requestAnimationFrame(monitor);
+export * from 'three-real';
+export default THREE;
