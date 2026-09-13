@@ -10,191 +10,38 @@ import * as MP from './systems/multiplayer.js';
 import * as HUD from './ui/hud.js';
 import { saveGame, loadGame } from './core/save.js';
 import { craftItem } from './core/gameplay.js';
+import { addXP, progress, XP_PER_ACTION } from './core/progression.js';
+import { BUILD_DEFS, structures, createStructure, addStructure, resolveStructureCollision, getBuildData } from './world/buildings.js';
 
-const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-const scene = new THREE.Scene();
-const FOG_COLOR = new THREE.Color(0x9fd0e8);
-scene.fog = new THREE.Fog(FOG_COLOR, 20, 190);
-scene.background = FOG_COLOR.clone();
-const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 500);
-scene.add(camera);
-const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x2b3a1e, 0.65);
-scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffffff, 1.1);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -60; sun.shadow.camera.right = 60; sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60; sun.shadow.camera.far = 200;
-scene.add(sun, sun.target);
-
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-buildTerrain(scene);
-buildNature(scene);
-const worldItems = spawnWorldItems(scene, 160);
-
-const player = {
-  pos: new THREE.Vector3(0, 0, 0), vel: new THREE.Vector3(), yaw: 0, pitch: 0,
-  onGround: false, hp: 100, hunger: 100, stamina: 100, alive: true,
-  inventory: {}, weapons: [], activeSlot: 0, lastShot: 0, name: 'Player', weaponAmmo: {}
-};
-player.pos.set(0, heightAt(0, 0) + 2, 0);
-const viewGroup = new THREE.Group();
-camera.add(viewGroup);
-const weaponAmmo = player.weaponAmmo;
-let currentWeaponMesh = null;
-
-function equipToHand(kind) {
-  viewGroup.clear(); currentWeaponMesh = null;
-  if (!kind) return;
-  const m = kind === 'pistol' ? createPistol() : kind === 'rifle' ? createRifle() : kind === 'axe' ? createAxe() : null;
-  if (!m) return;
-  m.position.set(0.18, -0.16, -0.35); m.rotation.y = Math.PI * 0.02; viewGroup.add(m); currentWeaponMesh = m;
-}
-
-function addItem(kind, n = 1) {
-  if (!ITEM_DEFS[kind]) return;
-  player.inventory[kind] = (player.inventory[kind] || 0) + n;
-  if (ITEM_DEFS[kind].weapon && !player.weapons.includes(kind)) player.weapons.push(kind);
-  HUD.refreshHotbar(player, weaponAmmo, ITEM_DEFS);
-  HUD.refreshBackpack(player, ITEM_DEFS, useItem);
-}
-function switchSlot(i) {
-  if (i < 0 || i >= player.weapons.length) return;
-  player.activeSlot = i; equipToHand(player.weapons[i]); HUD.refreshHotbar(player, weaponAmmo, ITEM_DEFS);
-}
-function useItem(kind) {
-  const def = ITEM_DEFS[kind];
-  if (!def || (player.inventory[kind] || 0) <= 0) return;
-  if (def.food) { player.hunger = Math.min(100, player.hunger + def.food); player.inventory[kind]--; }
-  else if (def.heal) { player.hp = Math.min(100, player.hp + def.heal); player.inventory[kind]--; }
-  else if (def.weapon) { const idx = player.weapons.indexOf(kind); if (idx >= 0) switchSlot(idx); }
-  HUD.refreshBackpack(player, ITEM_DEFS, useItem); HUD.refreshHotbar(player, weaponAmmo, ITEM_DEFS);
-}
-function toggleBackpack() { HUD.toggleBackpack(() => HUD.refreshBackpack(player, ITEM_DEFS, useItem)); }
-function reload() {
-  const kind = player.weapons[player.activeSlot]; if (!kind || kind === 'axe') return;
-  const def = weaponDefFor(kind), have = player.inventory.ammo || 0, need = def.magMax - (weaponAmmo[kind] || 0), use = Math.min(need, have);
-  if (use <= 0) return;
-  weaponAmmo[kind] = (weaponAmmo[kind] || 0) + use; player.inventory.ammo -= use;
-  HUD.refreshHotbar(player, weaponAmmo, ITEM_DEFS); HUD.refreshBackpack(player, ITEM_DEFS, useItem);
-}
-
-const raycaster = new THREE.Raycaster();
-const muzzleFlashLight = new THREE.PointLight(0xffcc77, 0, 6);
-scene.add(muzzleFlashLight);
-function shoot() {
-  if (!player.alive) return;
-  const kind = player.weapons[player.activeSlot]; if (!kind) return;
-  const def = weaponDefFor(kind), now = performance.now();
-  if (now - player.lastShot < def.fireDelay) return;
-  if (!def.melee) { if ((weaponAmmo[kind] || 0) <= 0) { reload(); return; } weaponAmmo[kind]--; }
-  player.lastShot = now; HUD.refreshHotbar(player, weaponAmmo, ITEM_DEFS);
-  muzzleFlashLight.position.copy(camera.position); muzzleFlashLight.intensity = 2.4; setTimeout(() => { muzzleFlashLight.intensity = 0; }, 60);
-  raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-  const targets = Object.values(MP.remotePlayers).map(p => p.hitMesh).filter(Boolean);
-  const hits = raycaster.intersectObjects(targets, true);
-  if (hits.length && hits[0].distance <= def.range) {
-    let obj = hits[0].object; while (obj && !obj.userData.playerId) obj = obj.parent;
-    if (obj && obj.userData.playerId) MP.broadcastHit(obj.userData.playerId, def.damage, myId);
-  }
-  if (currentWeaponMesh) { currentWeaponMesh.position.z += 0.05; setTimeout(() => { if (currentWeaponMesh) currentWeaponMesh.position.z -= 0.05; }, 70); }
-}
-
-let nearestItem = null;
-function updateNearestItem(isTouch) {
-  nearestItem = findNearestItem(worldItems, player.pos);
-  HUD.setPrompt(nearestItem ? `${isTouch ? 'دکمه برداشت را بزن: ' : 'E را بزن: '}${ITEM_DEFS[nearestItem.kind].name}` : null);
-}
-function tryInteract() {
-  if (!nearestItem || nearestItem.taken) return;
-  addItem(nearestItem.kind, nearestItem.kind === 'ammo' ? 12 : 1);
-  nearestItem.mesh.visible = false; nearestItem.taken = true; MP.broadcastItemTaken(nearestItem.id);
-  if (ITEM_DEFS[nearestItem.kind].weapon && player.weapons.length === 1) switchSlot(0);
-}
-
-const input = setupInput(player, canvas, { toggleBackpack, switchSlot, tryInteract, reload, shoot });
-
-function die(reason) { player.alive = false; HUD.showDeath(reason); }
-function respawn() {
-  player.hp = 100; player.hunger = 100; player.stamina = 100; player.alive = true;
-  player.pos.set((rng() * 2 - 1) * 20, 0, (rng() * 2 - 1) * 20); player.pos.y = heightAt(player.pos.x, player.pos.z) + 2; HUD.hideDeath();
-}
-document.getElementById('btnRespawn').addEventListener('click', respawn);
-
-document.querySelectorAll('[data-craft]').forEach(btn => btn.addEventListener('click', () => {
-  if (craftItem(player, btn.dataset.craft)) {
-    HUD.refreshHotbar(player, weaponAmmo, ITEM_DEFS); HUD.refreshBackpack(player, ITEM_DEFS, useItem);
-  }
-}));
-document.getElementById('btnSave')?.addEventListener('click', () => saveGame(player));
-
-function updateMovement(dt) {
-  if (!player.alive) return;
-  let mx = 0, mz = 0;
-  if (input.keys.KeyW) mz--; if (input.keys.KeyS) mz++; if (input.keys.KeyA) mx--; if (input.keys.KeyD) mx++;
-  if (input.isTouch) { mx += input.joyVec.x; mz += input.joyVec.y; }
-  const len = Math.hypot(mx, mz); if (len > 0) { mx /= len; mz /= len; }
-  const sprint = (input.keys.ShiftLeft || input.keys.ShiftRight) && player.stamina > 2;
-  const speed = sprint ? 6.2 : 3.4;
-  if (sprint && len > 0) player.stamina = Math.max(0, player.stamina - dt * 14); else player.stamina = Math.min(100, player.stamina + dt * 6);
-  const forward = new THREE.Vector3(Math.sin(player.yaw), 0, Math.cos(player.yaw));
-  const right = new THREE.Vector3(Math.sin(player.yaw + Math.PI / 2), 0, Math.cos(player.yaw + Math.PI / 2));
-  const move = new THREE.Vector3().addScaledVector(forward, -mz).addScaledVector(right, mx);
-  if (move.lengthSq() > 0) move.normalize(); player.vel.x = move.x * speed; player.vel.z = move.z * speed;
-  if ((input.keys.Space || input.jumpQueued.value) && player.onGround) { player.vel.y = 5.2; player.onGround = false; }
-  input.jumpQueued.value = false; player.vel.y -= 14 * dt; player.pos.x += player.vel.x * dt; player.pos.z += player.vel.z * dt; player.pos.y += player.vel.y * dt;
-  const groundY = heightAt(player.pos.x, player.pos.z) + 1.7;
-  if (player.pos.y <= groundY) { player.pos.y = groundY; player.vel.y = 0; player.onGround = true; }
-  player.pos.x = Math.max(-WORLD_HALF + 1, Math.min(WORLD_HALF - 1, player.pos.x)); player.pos.z = Math.max(-WORLD_HALF + 1, Math.min(WORLD_HALF - 1, player.pos.z));
-  camera.position.copy(player.pos); camera.rotation.order = 'YXZ'; camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
-  if (currentWeaponMesh) currentWeaponMesh.position.y = -0.16 + ((len > 0 && player.onGround) ? Math.sin(performance.now() * 0.012) * 0.012 : 0);
-}
-function updateSurvival(dt) {
-  if (!player.alive) return;
-  player.hunger = Math.max(0, player.hunger - dt * 0.35);
-  if (player.hunger <= 0) player.hp = Math.max(0, player.hp - dt * 2.2); else if (player.hunger > 60) player.hp = Math.min(100, player.hp + dt * 0.6);
-  if (player.hp <= 0) die('گرسنگی و ضعف'); HUD.updateBars(player.hp, player.hunger, player.stamina);
-}
-
-const myId = 'p_' + Math.random().toString(36).slice(2, 9);
-function onHit(dmg) { if (!player.alive) return; player.hp -= dmg; HUD.flashDamage(); if (player.hp <= 0) die('یک بازیکن دیگر'); }
-function onItemTaken(itemId) { const it = worldItems.find(w => w.id === itemId); if (it && !it.taken) { it.taken = true; it.mesh.visible = false; } }
-function onPresence(state, count) { HUD.updateClockCount(count); HUD.updatePlayersList(state, myId, player.name); }
-
-let renderStarted = false;
-function startGameLoop() {
-  if (renderStarted) return; renderStarted = true; HUD.enterGameUI();
-  if (!loadGame(player, heightAt)) { addItem('axe', 1); addItem('meat', 3); addItem('bandage', 2); addItem('ammo', 24); weaponAmmo.axe = 0; switchSlot(0); }
-  else { equipToHand(player.weapons[player.activeSlot]); }
-  HUD.refreshHotbar(player, weaponAmmo, ITEM_DEFS); HUD.refreshBackpack(player, ITEM_DEFS, useItem); tick();
-}
-
-const clock = new THREE.Clock(); let lastNetSend = 0; const clockEl = document.getElementById('clockTxt');
-function tick() {
-  requestAnimationFrame(tick); const dt = Math.min(0.05, clock.getDelta()); const t = clock.elapsedTime;
-  updateMovement(dt); updateSurvival(dt); updateSky(dt, { scene, sun, hemi, target: player.pos, clockEl }); MP.updateRemotes(dt); updateNearestItem(input.isTouch); animateItems(worldItems, t);
-  if (performance.now() - lastNetSend > 80) { MP.broadcastMove(myId, player); lastNetSend = performance.now(); }
-  if (Math.floor(t) % 5 === 0 && Math.floor(t) !== Math.floor(t - dt)) saveGame(player);
-  renderer.render(scene, camera);
-}
-
-document.getElementById('btnPlay').addEventListener('click', () => {
-  const name = document.getElementById('inName').value.trim() || 'Player' + Math.floor(Math.random() * 999);
-  const url = document.getElementById('inUrl').value.trim(); const key = document.getElementById('inKey').value.trim(); player.name = name;
-  MP.initMultiplayer(scene, url, key, name, myId, { onReady: startGameLoop, onHit, onItemTaken, onPresence });
-});
-try {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL; const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (envUrl) document.getElementById('inUrl').value = envUrl; if (envKey) document.getElementById('inKey').value = envKey;
-} catch (e) {}
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;
+const scene=new THREE.Scene();const FOG_COLOR=new THREE.Color(0x9fd0e8);scene.fog=new THREE.Fog(FOG_COLOR,20,190);scene.background=FOG_COLOR.clone();
+const camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,.1,500);scene.add(camera);const hemi=new THREE.HemisphereLight(0xbfe3ff,0x2b3a1e,.65);scene.add(hemi);const sun=new THREE.DirectionalLight(0xffffff,1.1);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-60;sun.shadow.camera.right=60;sun.shadow.camera.top=60;sun.shadow.camera.bottom=-60;sun.shadow.camera.far=200;scene.add(sun,sun.target);
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+buildTerrain(scene);buildNature(scene);const worldItems=spawnWorldItems(scene,160);
+const player={pos:new THREE.Vector3(0,0,0),vel:new THREE.Vector3(),yaw:0,pitch:0,onGround:false,hp:100,maxHp:100,hunger:100,stamina:100,staminaMax:100,alive:true,inventory:{},weapons:[],activeSlot:0,lastShot:0,name:'Player',weaponAmmo:{},level:1,xp:0};player.pos.set(0,heightAt(0,0)+2,0);
+const viewGroup=new THREE.Group();camera.add(viewGroup);const weaponAmmo=player.weaponAmmo;let currentWeaponMesh=null;let buildMode=false;let buildKind='foundation';let buildRotation=0;
+function equipToHand(kind){viewGroup.clear();currentWeaponMesh=null;if(!kind)return;const m=kind==='pistol'?createPistol():kind==='rifle'?createRifle():kind==='axe'?createAxe():null;if(!m)return;m.position.set(.18,-.16,-.35);m.rotation.y=Math.PI*.02;viewGroup.add(m);currentWeaponMesh=m;}
+function addItem(kind,n=1){if(!ITEM_DEFS[kind])return;player.inventory[kind]=(player.inventory[kind]||0)+n;if(ITEM_DEFS[kind].weapon&&!player.weapons.includes(kind))player.weapons.push(kind);HUD.refreshHotbar(player,weaponAmmo,ITEM_DEFS,equipToHand);HUD.refreshBackpack(player,ITEM_DEFS,useItem);}
+function switchSlot(i){if(i<0||i>=player.weapons.length)return;player.activeSlot=i;equipToHand(player.weapons[i]);HUD.refreshHotbar(player,weaponAmmo,ITEM_DEFS,equipToHand);}
+function useItem(kind){const d=ITEM_DEFS[kind];if(!d||(player.inventory[kind]||0)<=0)return;if(d.food){player.hunger=Math.min(100,player.hunger+d.food);player.inventory[kind]--;}else if(d.heal){player.hp=Math.min(player.maxHp,player.hp+d.heal);player.inventory[kind]--;}else if(d.weapon){const i=player.weapons.indexOf(kind);if(i>=0)switchSlot(i);}HUD.refreshBackpack(player,ITEM_DEFS,useItem);HUD.refreshHotbar(player,weaponAmmo,ITEM_DEFS,equipToHand);}
+function toggleBackpack(){HUD.toggleBackpack(()=>HUD.refreshBackpack(player,ITEM_DEFS,useItem));}
+function reload(){const kind=player.weapons[player.activeSlot];if(!kind||kind==='axe')return;const d=weaponDefFor(kind),have=player.inventory.ammo||0,need=d.magMax-(weaponAmmo[kind]||0),use=Math.min(need,have);if(use<=0)return;weaponAmmo[kind]=(weaponAmmo[kind]||0)+use;player.inventory.ammo-=use;HUD.refreshHotbar(player,weaponAmmo,ITEM_DEFS,equipToHand);}
+const raycaster=new THREE.Raycaster(),muzzle=new THREE.PointLight(0xffcc77,0,6);scene.add(muzzle);
+function shoot(){if(!player.alive||buildMode)return;const kind=player.weapons[player.activeSlot];if(!kind)return;const d=weaponDefFor(kind),now=performance.now();if(now-player.lastShot<d.fireDelay)return;if(!d.melee){if((weaponAmmo[kind]||0)<=0){reload();return;}weaponAmmo[kind]--;}player.lastShot=now;HUD.refreshHotbar(player,weaponAmmo,ITEM_DEFS,equipToHand);muzzle.position.copy(camera.position);muzzle.intensity=2.4;setTimeout(()=>muzzle.intensity=0,60);raycaster.setFromCamera({x:0,y:0},camera);const hits=raycaster.intersectObjects(Object.values(MP.remotePlayers).map(p=>p.hitMesh).filter(Boolean),true);if(hits.length&&hits[0].distance<=d.range){let o=hits[0].object;while(o&&!o.userData.playerId)o=o.parent;if(o?.userData.playerId){MP.broadcastHit(o.userData.playerId,d.damage,myId);addXP(player,XP_PER_ACTION.damage);HUD.updateProgress(player,progress(player));}}if(currentWeaponMesh){currentWeaponMesh.position.z+=.05;setTimeout(()=>currentWeaponMesh&&(currentWeaponMesh.position.z-=.05),70);}}
+let nearestItem=null;function updateNearestItem(isTouch){nearestItem=findNearestItem(worldItems,player.pos);HUD.setPrompt(nearestItem?`${isTouch?'دکمه برداشت را بزن: ':'E را بزن: '}${ITEM_DEFS[nearestItem.kind].name}`:null);}
+function tryInteract(){if(buildMode){placeBuilding();return;}if(!nearestItem||nearestItem.taken)return;addItem(nearestItem.kind,nearestItem.kind==='ammo'?12:1);nearestItem.mesh.visible=false;nearestItem.taken=true;MP.broadcastItemTaken(nearestItem.id);addXP(player,XP_PER_ACTION.pickup);HUD.updateProgress(player,progress(player));if(ITEM_DEFS[nearestItem.kind].weapon&&player.weapons.length===1)switchSlot(0);}
+function placeBuilding(){const def=BUILD_DEFS[buildKind];if(!def)return;const forward=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));const pos=player.pos.clone().addScaledVector(forward,4);pos.y=heightAt(pos.x,pos.z)+(def.size[1]/2);if(Math.abs(pos.x)>WORLD_HALF-5||Math.abs(pos.z)>WORLD_HALF-5)return;const s=createStructure(scene,player,buildKind,pos.x,pos.y,pos.z,buildRotation);if(!s){HUD.setPrompt('منابع کافی نیست');return;}MP.broadcastStructure(getBuildData(s));addXP(player,XP_PER_ACTION.build);HUD.updateProgress(player,progress(player));HUD.refreshBackpack(player,ITEM_DEFS,useItem);}
+function toggleBuild(){buildMode=!buildMode;HUD.setBuildMode(buildMode,buildKind,BUILD_DEFS[buildKind]);if(buildMode)HUD.setPrompt(`ساخت: ${BUILD_DEFS[buildKind].name} | B تغییر | E ساخت`);}
+function cycleBuild(){const keys=Object.keys(BUILD_DEFS),i=keys.indexOf(buildKind);buildKind=keys[(i+1)%keys.length];HUD.setBuildMode(buildMode,buildKind,BUILD_DEFS[buildKind]);}
+const myId='p_'+Math.random().toString(36).slice(2,9);
+const input=setupInput(player,canvas,{toggleBackpack,switchSlot,tryInteract,reload,shoot,toggleBuild,cycleBuild,rotateBuild:()=>{buildRotation+=Math.PI/2;}});
+function die(reason){player.alive=false;HUD.showDeath(reason);}function respawn(){player.hp=player.maxHp;player.hunger=100;player.stamina=player.staminaMax;player.alive=true;player.pos.set((rng()*2-1)*20,0,(rng()*2-1)*20);player.pos.y=heightAt(player.pos.x,player.pos.z)+1.7;HUD.hideDeath();}
+document.getElementById('btnRespawn').addEventListener('click',respawn);document.querySelectorAll('[data-craft]').forEach(b=>b.addEventListener('click',()=>{if(craftItem(player,b.dataset.craft)){addXP(player,XP_PER_ACTION.craft);HUD.updateProgress(player,progress(player));HUD.refreshHotbar(player,weaponAmmo,ITEM_DEFS,equipToHand);HUD.refreshBackpack(player,ITEM_DEFS,useItem);}}));document.getElementById('btnSave')?.addEventListener('click',()=>saveGame(player));
+function updateMovement(dt){if(!player.alive)return;let mx=0,mz=0;if(input.keys.KeyW)mz--;if(input.keys.KeyS)mz++;if(input.keys.KeyA)mx--;if(input.keys.KeyD)mx++;if(input.isTouch){mx+=input.joyVec.x;mz+=input.joyVec.y;}const len=Math.hypot(mx,mz);if(len>0){mx/=len;mz/=len;}const sprint=(input.keys.ShiftLeft||input.keys.ShiftRight)&&player.stamina>2;const speed=sprint?6.2:3.4;if(sprint&&len>0)player.stamina=Math.max(0,player.stamina-dt*14);else player.stamina=Math.min(player.staminaMax,player.stamina+dt*6);const f=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw)),r=new THREE.Vector3(Math.sin(player.yaw+Math.PI/2),0,Math.cos(player.yaw+Math.PI/2)),move=new THREE.Vector3().addScaledVector(f,-mz).addScaledVector(r,mx);if(move.lengthSq()>0)move.normalize();player.vel.x=move.x*speed;player.vel.z=move.z*speed;if((input.keys.Space||input.jumpQueued.value)&&player.onGround){player.vel.y=5.2;player.onGround=false;}input.jumpQueued.value=false;player.vel.y-=14*dt;player.pos.x+=player.vel.x*dt;player.pos.z+=player.vel.z*dt;player.pos.y+=player.vel.y*dt;const gy=heightAt(player.pos.x,player.pos.z)+1.7;if(player.pos.y<=gy){player.pos.y=gy;player.vel.y=0;player.onGround=true;}resolveStructureCollision(player);player.pos.x=Math.max(-WORLD_HALF+1,Math.min(WORLD_HALF-1,player.pos.x));player.pos.z=Math.max(-WORLD_HALF+1,Math.min(WORLD_HALF-1,player.pos.z));camera.position.copy(player.pos);camera.rotation.order='YXZ';camera.rotation.y=player.yaw;camera.rotation.x=player.pitch;if(currentWeaponMesh)currentWeaponMesh.position.y=-.16+(len>0&&player.onGround?Math.sin(performance.now()*.012)*.012:0);}
+function updateSurvival(dt){if(!player.alive)return;player.hunger=Math.max(0,player.hunger-dt*.35);if(player.hunger<=0)player.hp=Math.max(0,player.hp-dt*2.2);else if(player.hunger>60)player.hp=Math.min(player.maxHp,player.hp+dt*.6);if(player.hp<=0)die('گرسنگی و ضعف');HUD.updateBars(player.hp,player.hunger,player.stamina);}
+function onHit(dmg){if(!player.alive)return;player.hp-=dmg;HUD.flashDamage();if(player.hp<=0)die('یک بازیکن دیگر');}function onItemTaken(id){const it=worldItems.find(w=>w.id===id);if(it&&!it.taken){it.taken=true;it.mesh.visible=false;}}function onPresence(state,count){HUD.updateClockCount(count);HUD.updatePlayersList(state,myId,player.name);}function onStructure(data){addStructure(scene,data,false);}
+let renderStarted=false;function startGameLoop(){if(renderStarted)return;renderStarted=true;HUD.enterGameUI();if(!loadGame(player,heightAt)){addItem('axe',1);addItem('meat',3);addItem('bandage',2);addItem('ammo',24);switchSlot(0);}else equipToHand(player.weapons[player.activeSlot]);HUD.refreshHotbar(player,weaponAmmo,ITEM_DEFS,equipToHand);HUD.refreshBackpack(player,ITEM_DEFS,useItem);HUD.updateProgress(player,progress(player));tick();}
+const clock=new THREE.Clock();let lastNetSend=0;const clockEl=document.getElementById('clockTxt');function tick(){requestAnimationFrame(tick);const dt=Math.min(.05,clock.getDelta()),t=clock.elapsedTime;updateMovement(dt);updateSurvival(dt);updateSky(dt,{scene,sun,hemi,target:player.pos,clockEl});MP.updateRemotes(dt);updateNearestItem(input.isTouch);animateItems(worldItems,t);if(performance.now()-lastNetSend>80){MP.broadcastMove(myId,player);lastNetSend=performance.now();}if(Math.floor(t)%5===0&&Math.floor(t)!==Math.floor(t-dt))saveGame(player);renderer.render(scene,camera);}
+document.getElementById('btnPlay').addEventListener('click',()=>{player.name=document.getElementById('inName').value.trim()||'Player'+Math.floor(Math.random()*999);const url=document.getElementById('inUrl').value.trim(),key=document.getElementById('inKey').value.trim();MP.initMultiplayer(scene,url,key,player.name,myId,{onReady:startGameLoop,onHit,onItemTaken,onPresence,onStructure});});
+try{const u=import.meta.env.VITE_SUPABASE_URL,k=import.meta.env.VITE_SUPABASE_ANON_KEY;if(u)document.getElementById('inUrl').value=u;if(k)document.getElementById('inKey').value=k;}catch(e){}
